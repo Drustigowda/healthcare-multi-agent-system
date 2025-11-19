@@ -1,0 +1,725 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Multi-Agent Healthcare Data Analysis & Decision Support</title>
+
+  <!-- CDN libs -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root{
+      --bg:#0f1724; --card:#0b1220; --muted:#94a3b8; --accent:#22c55e; --danger:#ef4444;
+      --glass: rgba(255,255,255,0.03);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; background: linear-gradient(180deg,#071028 0%, #071a2f 100%); color:#e6eef6;
+      -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+    }
+    header{
+      display:flex; align-items:center; justify-content:space-between; gap:1rem;
+      padding:18px 28px; border-bottom:1px solid rgba(255,255,255,0.03);
+      background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
+      position:sticky; top:0; z-index:50;
+    }
+    .brand{display:flex; gap:12px; align-items:center}
+    .logo{
+      width:44px;height:44px;border-radius:8px;background:linear-gradient(135deg,#06b6d4,#7c3aed);
+      display:grid;place-items:center;font-weight:700;color:#021024;font-size:18px;
+      box-shadow:0 6px 18px rgba(2,16,36,0.5);
+    }
+    h1{font-size:16px;margin:0}
+    header .actions{display:flex;gap:8px;align-items:center}
+    button, .btn{
+      background:var(--glass); border:1px solid rgba(255,255,255,0.04); padding:8px 12px; border-radius:8px;
+      color:var(--muted); cursor:pointer; font-weight:600; font-size:13px;
+    }
+    button.primary{background:linear-gradient(90deg,#0ea5a4,#06b6d4); color:#001617; border:0}
+    main{display:grid;grid-template-columns:320px 1fr; gap:20px;padding:22px;}
+    /* sidebar */
+    .sidebar{background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent); padding:16px;border-radius:12px; min-height:520px}
+    .section-title{font-size:13px;color:var(--muted);margin-bottom:8px}
+    .agent{
+      display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.02);
+      margin-bottom:8px;border:1px solid rgba(255,255,255,0.02)
+    }
+    .dot{width:12px;height:12px;border-radius:50%;}
+    .dot.idle{background:#f59e0b}
+    .dot.running{background:#06b6d4}
+    .dot.done{background:var(--accent)}
+    .controls{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+    .file-row{display:flex;gap:8px;align-items:center}
+    .file-row input[type=file]{display:none}
+    label.file-btn{cursor:pointer}
+    .small{font-size:12px;color:var(--muted)}
+    /* main content */
+    .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent); padding:16px;border-radius:12px}
+    .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .chart-wrap{height:260px}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{padding:8px;border-bottom:1px dashed rgba(255,255,255,0.02); text-align:left}
+    th{color:var(--muted); font-weight:600; font-size:12px}
+    tr.highrisk td{background:linear-gradient(90deg, rgba(239,68,68,0.06), transparent)}
+    .log{height:140px; overflow:auto; padding:8px; border-radius:8px; background:rgba(0,0,0,0.2); font-family:monospace; font-size:13px; color:#cfe7d9}
+    .toolbar{display:flex;gap:8px;align-items:center; margin-bottom:12px}
+    .search{flex:1; display:flex; gap:8px}
+    input.search-box{background:transparent;border:1px solid rgba(255,255,255,0.04); padding:8px;border-radius:8px;color:var(--muted); width:100%}
+    footer{padding:18px; color:var(--muted); font-size:13px; text-align:center}
+    .chip{display:inline-block;padding:6px 8px;border-radius:999px;background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.02); font-size:12px}
+    @media (max-width:980px){
+      main{grid-template-columns:1fr; padding:12px}
+      .chart-wrap{height:200px}
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="logo">MAS</div>
+      <div>
+        <h1>Multi-Agent Healthcare Analysis</h1>
+        <div class="small">Data analysis • Anomaly detection • Decision support</div>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="demoBtn" class="btn">Load Demo Data</button>
+      <label class="file-btn btn">
+        Upload CSV
+        <input id="fileInput" type="file" accept=".csv" />
+      </label>
+      <button id="startBtn" class="primary">Run Agents</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- SIDEBAR: Agents + Controls -->
+    <aside class="sidebar card">
+      <div class="section-title">Agents</div>
+
+      <div id="agentsList">
+        <!-- dynamically populated -->
+      </div>
+
+      <div class="section-title" style="margin-top:12px">Data Controls</div>
+      <div class="controls">
+        <div class="file-row">
+          <label for="fileInput" class="btn">Select CSV</label>
+          <button id="clearBtn" class="btn">Clear</button>
+        </div>
+        <div class="small">CSV must contain at least: <code>id,age,gender,heart_rate,blood_pressure_sys,
+          blood_pressure_diastolic,temperature</code></div>
+
+        <div class="section-title">Quick Filters</div>
+        <div style="display:flex;gap:8px">
+          <button class="btn" id="filterAll">All</button>
+          <button class="btn" id="filterHigh">High Risk</button>
+          <button class="btn" id="filterNormal">Normal</button>
+        </div>
+
+        <div class="section-title" style="margin-top:12px">Export & Reports</div>
+        <div style="display:flex;gap:8px">
+          <button id="exportBtn" class="btn">Export Results (CSV)</button>
+          <button id="downloadChartBtn" class="btn">Download Chart</button>
+        </div>
+      </div>
+
+      <div style="margin-top:14px">
+        <div class="section-title">Real-time Log</div>
+        <div id="logBox" class="log">Ready. Load data to begin.</div>
+      </div>
+    </aside>
+
+    <!-- MAIN: charts, table, controls -->
+    <section>
+      <div class="grid-2" style="margin-bottom:12px">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              <div class="section-title">Patient Overview</div>
+              <div class="small">Summary metrics and risk distribution</div>
+            </div>
+            <div style="text-align:right">
+              <div class="chip" id="totalCount">Total: 0</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:12px">
+            <div style="flex:1">
+              <div style="font-size:20px;font-weight:700" id="avgAge">—</div>
+              <div class="small">Average age</div>
+            </div>
+            <div style="flex:1">
+              <div style="font-size:20px;font-weight:700" id="avgTemp">—</div>
+              <div class="small">Average temperature (°C)</div>
+            </div>
+            <div style="flex:1">
+              <div style="font-size:20px;font-weight:700" id="highCount">—</div>
+              <div class="small">High risk patients</div>
+            </div>
+          </div>
+          <div style="margin-top:12px" class="chart-wrap">
+            <canvas id="riskChart"></canvas>
+          </div>
+        </div>
+
+        <div class="card">
+          <div>
+            <div class="section-title">Agent Activity</div>
+            <div class="small">Visual simulation of agents processing the data</div>
+          </div>
+
+          <div style="margin-top:12px" id="agentCards"></div>
+
+          <div style="margin-top:12px;display:flex;gap:8px;">
+            <button id="pauseBtn" class="btn">Pause Agents</button>
+            <button id="resetAgents" class="btn">Reset Agents</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:12px">
+        <div class="toolbar">
+          <div class="search">
+            <input id="searchBox" class="search-box" placeholder="Search by id, gender or risk..." />
+            <select id="perPage" class="btn" style="width:110px">
+              <option value="10">Show 10</option>
+              <option value="25">Show 25</option>
+              <option value="50">Show 50</option>
+            </select>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button id="analyzeBtn" class="btn">Analyze Now</button>
+            <button id="suggestBtn" class="btn">Show Suggestions</button>
+          </div>
+        </div>
+
+        <div class="section-title">Patient Table</div>
+        <div style="overflow:auto;max-height:420px;margin-top:8px">
+          <table id="dataTable" cellpadding="0" cellspacing="0">
+            <thead>
+              <tr>
+                <th>id</th><th>age</th><th>gender</th><th>hr</th><th>bp_sys</th><th>bp_dia</th><th>temp</th><th>risk</th><th>suggestion</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody">
+              <!-- rows -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Detailed Logs & Decisions</div>
+        <div id="decisionLog" class="log">No decisions yet.</div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Built with simulated agents • Simple heuristics for demo only — not medical advice.
+  </footer>
+
+  <script>
+    /*****************************************************************************
+     * Multi-Agent Healthcare Data Analysis & Decision Support (Front-end demo)
+     * - Uses PapaParse for CSV parsing
+     * - Uses Chart.js for visualization
+     * - Simulates 3 agents: Data Cleaner, Analyzer, Decision Support
+     * - Performs simple z-score based outlier detection + rule-based risk scoring
+     *****************************************************************************/
+
+    // ---- app state ----
+    const state = {
+      raw: [],           // original rows (objects)
+      data: [],          // processed rows
+      results: [],       // enriched with risk / suggestions
+      agents: [
+        { id: 'cleaner', name: 'Data Cleaner', status: 'idle', progress:0 },
+        { id: 'analyzer', name: 'Analyzer', status: 'idle', progress:0 },
+        { id: 'decider', name: 'Decision Support', status: 'idle', progress:0 }
+      ],
+      logLines: [],
+      paused: false,
+      chart: null,
+      filter: 'all'
+    };
+
+    // ---- utilities ----
+    function log(msg){
+      const t = new Date().toLocaleTimeString();
+      state.logLines.push(`[${t}] ${msg}`);
+      if(state.logLines.length>400) state.logLines.shift();
+      document.getElementById('logBox').textContent = state.logLines.join('\n');
+      // also append to decisionLog for decisions
+      document.getElementById('decisionLog').textContent = state.logLines.filter(l=>/DECISION|SUGGESTION/.test(l)).join('\n') || 'No decisions yet.';
+    }
+
+    function setAgentStatus(id, status, progress){
+      const ag = state.agents.find(a=>a.id===id);
+      if(!ag) return;
+      ag.status = status || ag.status;
+      if(typeof progress === 'number') ag.progress = progress;
+      renderAgents();
+    }
+
+    // ---- DOM bindings ----
+    const fileInput = document.getElementById('fileInput');
+    const demoBtn = document.getElementById('demoBtn');
+    const startBtn = document.getElementById('startBtn');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const suggestBtn = document.getElementById('suggestBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const downloadChartBtn = document.getElementById('downloadChartBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const searchBox = document.getElementById('searchBox');
+    const perPage = document.getElementById('perPage');
+    const filterAll = document.getElementById('filterAll');
+    const filterHigh = document.getElementById('filterHigh');
+    const filterNormal = document.getElementById('filterNormal');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resetAgentsBtn = document.getElementById('resetAgents');
+
+    fileInput.addEventListener('change', e=> handleFile(e.target.files[0]));
+    demoBtn.addEventListener('click', loadDemoData);
+    startBtn.addEventListener('click', ()=> runAgents());
+    analyzeBtn.addEventListener('click', runAnalyzer);
+    suggestBtn.addEventListener('click', showSuggestions);
+    exportBtn.addEventListener('click', exportResultsCSV);
+    downloadChartBtn.addEventListener('click', downloadChartImage);
+    clearBtn.addEventListener('click', clearAllData);
+    searchBox.addEventListener('input', renderTable);
+    perPage.addEventListener('change', renderTable);
+    filterAll.addEventListener('click', ()=> { state.filter='all'; renderTable(); });
+    filterHigh.addEventListener('click', ()=> { state.filter='high'; renderTable(); });
+    filterNormal.addEventListener('click', ()=> { state.filter='normal'; renderTable(); });
+    pauseBtn.addEventListener('click', ()=> { state.paused = !state.paused; pauseBtn.textContent = state.paused ? 'Resume Agents' : 'Pause Agents'; log(state.paused ? 'Agents paused' : 'Agents resumed');});
+    resetAgentsBtn.addEventListener('click', resetAgents);
+
+    // ---- file & data handling ----
+    function handleFile(file){
+      if(!file) return;
+      Papa.parse(file, {
+        header:true, dynamicTyping:true, skipEmptyLines:true,
+        complete: results => {
+          state.raw = results.data.map(r => normalizeRow(r));
+          state.data = JSON.parse(JSON.stringify(state.raw));
+          state.results = []; // reset
+          log(`Loaded ${state.data.length} rows from CSV`);
+          updateSummary();
+          renderTable();
+          renderRiskChart();
+        },
+        error: err => { log('CSV parse error: ' + err.message); }
+      });
+    }
+
+    function normalizeRow(r){
+      // key mapping tolerant: convert various column names to expected ones
+      const mapKey = (k) => (k||'').toString().trim().toLowerCase();
+      const out = {};
+      for(const k in r){
+        const mk = mapKey(k);
+        const v = r[k];
+        if(/id/.test(mk)) out.id = String(v);
+        else if(/age/.test(mk)) out.age = Number(v) || null;
+        else if(/gender/.test(mk)) out.gender = String(v||'').trim();
+        else if(/heart|hr/.test(mk)) out.heart_rate = Number(v) || null;
+        else if(/bp.*systolic|sys/.test(mk)) out.bp_sys = Number(v) || null;
+        else if(/bp.*diastolic|dia/.test(mk)) out.bp_dia = Number(v) || null;
+        else if(/temp|temperature/.test(mk)) out.temperature = Number(v) || null;
+        else out[mk]=v;
+      }
+      // ensure minimal shape
+      out.id = out.id || ('uid-' + Math.random().toString(36).slice(2,9));
+      return out;
+    }
+
+    function loadDemoData(){
+      // small synthetic dataset
+      const csv = `id,age,gender,heart_rate,blood_pressure_systolic,blood_pressure_diastolic,temperature
+P001,45,M,78,130,82,37.0
+P002,72,F,92,160,95,38.5
+P003,29,F,66,115,75,36.6
+P004,55,M,88,148,90,37.8
+P005,39,M,72,120,80,36.8
+P006,82,F,110,180,105,39.3
+P007,50,F,85,142,88,37.2
+P008,30,M,64,110,70,36.5
+P009,67,M,95,155,98,38.0
+P010,22,F,58,105,68,36.4
+`;
+      Papa.parse(csv, { header:true, dynamicTyping:true, complete: r => {
+        state.raw = r.data.map(row=>normalizeRow(row));
+        state.data = JSON.parse(JSON.stringify(state.raw));
+        state.results = [];
+        log(`Demo dataset loaded (${state.data.length} rows)`);
+        updateSummary();
+        renderTable();
+        renderRiskChart();
+      }});
+    }
+
+    function clearAllData(){
+      state.raw = []; state.data = []; state.results = [];
+      updateSummary(); renderTable(); renderRiskChart(); log('Cleared data and results.');
+    }
+
+    // ---- analysis logic (simple heuristics + outlier detection) ----
+    function computeStats(arr, key){
+      const vals = arr.map(r=>Number(r[key])).filter(v=>isFinite(v));
+      if(vals.length===0) return {mean:0,sd:0};
+      const mean = vals.reduce((s,v)=>s+v,0)/vals.length;
+      const sd = Math.sqrt(vals.reduce((s,v)=>s+(v-mean)**2,0)/vals.length);
+      return {mean,sd};
+    }
+
+    function zscoreDetect(arr, key, threshold=2.5){
+      const stats = computeStats(arr,key);
+      return arr.map(r=>{
+        const v = Number(r[key]);
+        if(!isFinite(v)) return false;
+        const z = sdSafe(stats.sd) ? Math.abs((v-stats.mean)/stats.sd) : 0;
+        return z > threshold;
+      });
+    }
+    function sdSafe(sd){ return typeof sd==='number' && sd>0.000001; }
+
+    function analyzeDataset(){
+      if(!state.data.length) { log('No data to analyze'); return; }
+      log('Analyzer: computing stats and risk scores');
+      const hrStats = computeStats(state.data, 'heart_rate');
+      const bpSysStats = computeStats(state.data, 'bp_sys');
+      const tempStats = computeStats(state.data, 'temperature');
+
+      // z-score outliers
+      const hrOut = zscoreDetect(state.data,'heart_rate',2.5);
+      const bpOut = zscoreDetect(state.data,'bp_sys',2.5);
+      const tempOut = zscoreDetect(state.data,'temperature',2.5);
+
+      // Build results
+      state.results = state.data.map((r, idx) => {
+        const score = computeRiskScore(r, {hrStats, bpSysStats, tempStats}, {hrOut:hrOut[idx], bpOut:bpOut[idx], tempOut:tempOut[idx]});
+        const suggestion = suggestForScore(score, r);
+        return {...r, riskScore: Number(score.toFixed(2)), riskCategory: categorizeRisk(score), suggestion};
+      });
+      updateSummary();
+      renderTable();
+      renderRiskChart();
+      log('Analyzer: results computed for ' + state.results.length + ' records');
+    }
+
+    function computeRiskScore(row, stats, outliers){
+      // Simple heuristic scoring:
+      // base 0-10 age factor, hr deviation, bp systolic, temp, outlier bonus
+      let s = 0;
+      if(row.age) s += Math.min(3, (row.age - 20)/20); // older -> higher
+      if(row.heart_rate) {
+        const hrMean = stats.hrStats.mean||70;
+        s += Math.abs(row.heart_rate - hrMean)/40 * 3; // normalized
+      }
+      if(row.bp_sys) {
+        const bpMean = stats.bpSysStats.mean||120;
+        s += Math.max(0,(row.bp_sys - 120)/40) * 3; // high systolic adds more
+      }
+      if(row.temperature) s += Math.max(0, (row.temperature - 37)/2) * 2;
+      // outlier bonuses
+      if(outliers.hrOut) s += 1.5;
+      if(outliers.bpOut) s += 1.5;
+      if(outliers.tempOut) s += 1.5;
+      // clamp 0-10
+      return Math.max(0, Math.min(10, s));
+    }
+
+    function categorizeRisk(score){
+      if(score >= 6.5) return 'High';
+      if(score >= 3.5) return 'Medium';
+      return 'Low';
+    }
+
+    function suggestForScore(score, row){
+      // Basic decision support suggestions (demo)
+      if(score >= 8) return 'Immediate evaluation & possible hospitalization. Notify physician.';
+      if(score >= 6.5) return 'High risk — arrange urgent follow-up and diagnostic tests.';
+      if(score >= 4) return 'Monitor closely. Suggest vitals re-check and medication review.';
+      if(score >= 2) return 'Preventive counseling; lifestyle advice and follow-up.';
+      return 'Low risk — routine monitoring.';
+    }
+
+    // ---- agents simulation ----
+    let agentTimers = {};
+
+    function runAgents(){
+      if(!state.data.length){ log('No data loaded. Please upload CSV or load demo data.'); return; }
+      log('Starting agents workflow...');
+      // reset previous
+      resetAgents();
+
+      // Sequence: cleaner -> analyzer -> decider
+      startAgent('cleaner', async () => {
+        await sleep(400);
+        // data cleaning: fill missing numeric with medians, basic smoothing
+        setAgentStatus('cleaner','running',10); await sleep(350);
+        dataCleaner();
+        setAgentStatus('cleaner','running',80); await sleep(350);
+        setAgentStatus('cleaner','done',100);
+      }).then(() => {
+        return startAgent('analyzer', async () => {
+          setAgentStatus('analyzer','running',5); await sleep(300);
+          runAnalyzer(); // fills state.results
+          setAgentStatus('analyzer','running',85); await sleep(300);
+          setAgentStatus('analyzer','done',100);
+        });
+      }).then(() => {
+        return startAgent('decider', async () => {
+          setAgentStatus('decider','running',2); await sleep(300);
+          decisionSupport();
+          setAgentStatus('decider','running',70); await sleep(300);
+          setAgentStatus('decider','done',100);
+        });
+      }).catch(err => log('Agent workflow stopped: ' + err.message));
+    }
+
+    function startAgent(id, fn){
+      return new Promise((resolve,reject)=>{
+        if(state.paused) { log('Agents are paused, cannot start ' + id); reject(new Error('paused')); return; }
+        setAgentStatus(id,'running',0);
+        // run fn but allow pause checks in between via sleep
+        (async ()=>{
+          try{
+            await fn();
+            resolve();
+          }catch(e){
+            reject(e);
+          }
+        })();
+      });
+    }
+
+    function resetAgents(){
+      state.agents.forEach(a=>{ a.status='idle'; a.progress=0;});
+      renderAgents();
+      log('Agents reset.');
+    }
+
+    async function dataCleaner(){
+      log('Cleaner: starting basic cleaning...');
+      // fill missing numeric with column median
+      const keys = ['age','heart_rate','bp_sys','bp_dia','temperature'];
+      const medians = {};
+      keys.forEach(k=>{
+        const vals = state.data.map(r=>Number(r[k])).filter(v=>isFinite(v)).sort((a,b)=>a-b);
+        medians[k] = vals.length ? vals[Math.floor(vals.length/2)] : null;
+      });
+      state.data.forEach((r, idx)=>{
+        keys.forEach(k=>{
+          if(!isFinite(Number(r[k]))) r[k] = medians[k];
+        });
+        // small normalization
+        if(r.gender) r.gender = String(r.gender).charAt(0).toUpperCase();
+      });
+      log('Cleaner: missing values filled with medians: ' + JSON.stringify(medians));
+      updateSummary();
+      renderTable();
+    }
+
+    function runAnalyzer(){
+      setAgentStatus('analyzer','running',10);
+      analyzeDataset();
+      setAgentStatus('analyzer','running',100);
+    }
+
+    function decisionSupport(){
+      log('Decision Support: generating suggestions for high risk patients');
+      if(!state.results.length) analyzeDataset();
+      const high = state.results.filter(r => r.riskCategory === 'High');
+      high.forEach(h => {
+        log(`SUGGESTION: id=${h.id} risk=${h.riskScore} -> ${h.suggestion}`);
+      });
+    }
+
+    // ---- rendering ----
+    function renderAgents(){
+      const container = document.getElementById('agentsList');
+      container.innerHTML = '';
+      state.agents.forEach(a=>{
+        const div = document.createElement('div');
+        div.className = 'agent';
+        div.innerHTML = `
+          <div style="display:flex;flex-direction:column;gap:4px;width:100%">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div style="display:flex;gap:10px;align-items:center">
+                <div class="dot ${a.status==='idle'?'idle':a.status==='running'?'running':'done'}"></div>
+                <div style="font-weight:700">${a.name}</div>
+              </div>
+              <div style="font-size:12px;color:var(--muted)">${a.status.toUpperCase()} ${a.progress?(' — ' + a.progress + '%'):''}</div>
+            </div>
+            <div style="height:8px;background:rgba(255,255,255,0.03);border-radius:8px;overflow:hidden">
+              <div style="height:100%;width:${a.progress}%;background:linear-gradient(90deg,#06b6d4,#7c3aed)"></div>
+            </div>
+          </div>
+        `;
+        container.appendChild(div);
+      });
+
+      // also render agent cards
+      const agentCards = document.getElementById('agentCards');
+      agentCards.innerHTML = '';
+      state.agents.forEach(a=>{
+        const c = document.createElement('div');
+        c.style.marginTop='8px';
+        c.className='card';
+        c.style.padding='10px';
+        c.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
+          <div><strong>${a.name}</strong><div class="small">${a.id}</div></div>
+          <div style="text-align:right">
+            <div class="small">${a.status}</div>
+            <div style="font-weight:700">${a.progress}%</div>
+          </div>
+        </div>`;
+        agentCards.appendChild(c);
+      });
+    }
+
+    function updateSummary(){
+      const cnt = state.data.length;
+      document.getElementById('totalCount').textContent = 'Total: ' + cnt;
+      const avgAge = computeStats(state.data,'age').mean || 0;
+      document.getElementById('avgAge').textContent = cnt ? avgAge.toFixed(1) + ' yrs' : '—';
+      const avgTemp = computeStats(state.data,'temperature').mean || 0;
+      document.getElementById('avgTemp').textContent = cnt ? avgTemp.toFixed(2) + ' °C' : '—';
+      const highCount = state.results.filter(r=>r.riskCategory==='High').length || 0;
+      document.getElementById('highCount').textContent = highCount;
+    }
+
+    function renderTable(){
+      const tbody = document.getElementById('tableBody');
+      tbody.innerHTML = '';
+      const query = (searchBox.value||'').toLowerCase().trim();
+      const per = Number(perPage.value) || 25;
+      let rows = (state.results.length ? state.results : state.data).slice();
+
+      if(state.filter === 'high'){
+        rows = rows.filter(r => r.riskCategory === 'High');
+      } else if(state.filter === 'normal'){
+        rows = rows.filter(r => r.riskCategory !== 'High');
+      }
+
+      if(query){
+        rows = rows.filter(r => {
+          const s = JSON.stringify(r).toLowerCase();
+          return s.includes(query);
+        });
+      }
+
+      rows.slice(0,per).forEach(r=>{
+        const tr = document.createElement('tr');
+        if(r.riskCategory === 'High') tr.className='highrisk';
+        tr.innerHTML = `
+          <td>${escapeHtml(r.id||'')}</td>
+          <td>${escapeHtml(r.age||'—')}</td>
+          <td>${escapeHtml(r.gender||'—')}</td>
+          <td>${escapeHtml(r.heart_rate||'—')}</td>
+          <td>${escapeHtml(r.bp_sys||'—')}</td>
+          <td>${escapeHtml(r.bp_dia||'—')}</td>
+          <td>${escapeHtml(r.temperature||'—')}</td>
+          <td>${escapeHtml(r.riskCategory || (r.riskScore ? categorizeRisk(r.riskScore) : '—'))}</td>
+          <td>${escapeHtml(r.suggestion || '—')}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      updateSummary();
+    }
+
+    function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    // ---- charts ----
+    function renderRiskChart(){
+      const ctx = document.getElementById('riskChart').getContext('2d');
+      const rows = state.results.length ? state.results : state.data;
+      const counts = rows.reduce((acc, r) => {
+        const cat = (r.riskCategory || categorizeRisk(r.riskScore || 0));
+        acc[cat] = (acc[cat] || 0) + 1;
+        return acc;
+      }, {});
+      const labels = ['Low','Medium','High'];
+      const data = labels.map(l => counts[l] || 0);
+
+      if(state.chart) state.chart.destroy();
+      state.chart = new Chart(ctx, {
+        type:'doughnut',
+        data: {
+          labels,
+          datasets:[{label:'Risk distribution', data}]
+        },
+        options: {
+          responsive:true,
+          plugins: {
+            legend: { position: 'bottom', labels:{ color:'#cfe7d9' } }
+          }
+        }
+      });
+    }
+
+    function downloadChartImage(){
+      if(!state.chart) { log('No chart to download'); return; }
+      const a = document.createElement('a');
+      a.href = state.chart.toBase64Image();
+      a.download = 'risk-chart.png';
+      a.click();
+      log('Risk chart downloaded as PNG');
+    }
+
+    // ---- export CSV ----
+    function exportResultsCSV(){
+      const rows = state.results.length ? state.results : state.data;
+      if(!rows.length){ log('Nothing to export'); return; }
+      const csv = Papa.unparse(rows);
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'mas_healthcare_results.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+      log('Exported results as CSV');
+    }
+
+    // ---- suggestions & UI ----
+    function showSuggestions(){
+      if(!state.results.length) analyzeDataset();
+      const high = state.results.filter(r => r.riskCategory === 'High');
+      if(!high.length){ alert('No high-risk patients found.'); return; }
+      const list = high.map(h=>`${h.id} (score ${h.riskScore}) -> ${h.suggestion}`).join('\n\n');
+      alert('High risk patients and suggestions:\n\n' + list);
+      log('SUGGESTION: displayed ' + high.length + ' high-risk patients.');
+    }
+
+    // ---- helper functions ----
+    function sleep(ms){ return new Promise(res => setTimeout(()=>{ if(state.paused) { ms+=0; } res(); }, ms)); }
+
+    // small init
+    function init(){
+      renderAgents();
+      renderRiskChart();
+      updateSummary();
+      log('Interface ready.');
+    }
+    init();
+
+    // ---- small niceties: keyboard search enter to analyze ----
+    document.addEventListener('keydown', e=>{
+      if(e.key === 'Enter' && document.activeElement === searchBox){
+        runAnalyzer();
+      }
+    });
+
+    // expose some functions for debugging from console
+    window._MAS = { state, analyzeDataset, runAgents, loadDemoData, exportResultsCSV, renderTable };
+
+  </script>
+</body>
+</html>  
